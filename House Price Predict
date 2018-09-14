@@ -1,0 +1,221 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+color = sns.color_palette()
+sns.set_style('darkgrid')
+import warnings
+def ignore_warn(*args, **kwargs):
+    pass
+warnings.warn = ignore_warn
+from scipy import stats
+from scipy.stats import norm, skew
+from sklearn.preprocessing import LabelEncoder
+from scipy.special import boxcox1p
+
+
+train = pd.read_csv('./train.csv', sep=',')
+test = pd.read_csv('./test.csv')
+
+#Save the 'Id' column
+#Now drop the  'Id' colum since it's unnecessary for  the prediction process.
+train_ID = train['Id']
+test_ID = test['Id']
+train.drop('Id', axis=1, inplace=True)
+test.drop('Id', axis=1, inplace=True)
+
+'''
+Outlinear in the GrLivArea is recommended by the author of the data to remove it. 
+'''
+fig, ax = plt.subplots()
+ax.scatter(x = train['GrLivArea'], y = train['SalePrice'])
+plt.xlabel('GrLivArea', fontsize=13)
+plt.ylabel('SalePrice', fontsize=13)
+plt.show()
+
+train = train.drop(train[(train['GrLivArea']>4000) & (train['SalePrice']<300000)].index)
+
+
+
+corrmat = train.corr()
+top_corr_features = corrmat.index[abs(corrmat['SalePrice'])>0.5]
+plt.figure(figsize=(10, 10))
+g = sns.heatmap(train[top_corr_features].corr(), annot=True, cmap='RdYlGn')
+
+sns.set()
+cols = ['SalePrice', 'OverallQual', 'GrLivArea', 'GarageCars', 'TotalBsmtSF', 'FullBath', 'YearBuilt']
+sns.pairplot(train[cols], size=2.5)
+plt.show()
+
+fig, ax = plt.subplots()
+ax.scatter(x = train['GrLivArea'], y = train['TotalBsmtSF'])
+plt.show()
+
+
+def check_skewness(col):
+    sns.distplot(train[col], fit=norm)
+    fig = plt.figure()
+    res = stats.probplot(train[col], plot=plt)
+    (mu, sigma) = norm.fit(train[col])
+    print('\n mu = {:.2f} and sigma = {:.2f}\n'.format(mu, sigma))
+
+check_skewness('SalePrice')
+train['SalePrice'] = np.log1p(train['SalePrice'])
+check_skewness('SalePrice')
+
+ntrain = train.shape[0]
+ntest = test.shape[0]
+y_train = train['SalePrice'].values
+all_data = pd.concat((train, test)).reset_index(drop=True)
+all_data.drop(['SalePrice'], axis=1, inplace=True)
+
+
+'''
+missing data
+'''
+
+all_data_na = (all_data.isnull().sum()/len(all_data))*100
+all_data_na = all_data_na.drop(all_data_na[all_data_na==0].index).sort_values(ascending=False)[:30]
+missing_data = pd.DataFrame({'Missing Ratio' :all_data_na})
+
+fig, ax = plt.subplots(figsize=(15, 12))
+plt.xticks(rotation='45')
+sns.barplot(x=all_data_na.index, y=all_data_na)
+plt.xlabel('Features', fontsize=15)
+plt.ylabel('Percent of missing Values', fontsize=15)
+plt.title('Percent missing data by feature', fontsize=15)
+
+all_data['PoolQC'][all_data['PoolQC'].notnull()]
+
+'''
+handle missing data
+'''
+all_data['PoolQC'] = all_data['PoolQC'].fillna('None')
+all_data['MiscFeature'] = all_data['MiscFeature'].fillna('None')
+all_data['Alley'] = all_data['Alley'].fillna('None')
+all_data['Fence'] = all_data['Fence'].fillna('None')
+all_data['FireplaceQu'] = all_data['FireplaceQu'].fillna('None')
+
+grouped_df = all_data.groupby('Neighborhood')['LotFrontage']
+for key, item in grouped_df:
+    print(key, '\n')
+    print(grouped_df.get_group(key))
+    break
+all_data['LotFrontage'] = all_data.groupby('Neighborhood')['LotFrontage'].transform(lambda x: x.fillna(x.median()))
+
+for col in ['GarageType', 'GarageFinish', 'GarageQual', 'GarageCond']:
+    all_data[col] = all_data[col].fillna('None')
+abc = ['GarageType', 'GarageFinish', 'GarageQual', 'GarageCond', 'GarageYrBlt', 'GarageArea', 'GarageCars']
+all_data.groupby('GarageType')[abc].count()
+
+for col in ('GarageYrBlt', 'GarageArea', 'GarageCars'):
+    all_data[col] = all_data[col].fillna(0)
+
+for col in ('BsmtFinSF1', 'BsmtFinSF2', 'BsmtUnfSF', 'TotalBsmtSF', 'BsmtFullBath', 'BsmtHalfBath'):
+    all_data[col] = all_data[col].fillna(0)
+
+for col in ('BsmtQual', 'BsmtCond', 'BsmtExposure', 'BsmtFinType1', 'BsmtFinType2'):
+    all_data[col] = all_data[col].fillna('None')
+
+all_data['MasVnrType'] = all_data['MasVnrType'].fillna('None')
+all_data['MasVnrArea'] = all_data['MasVnrArea'].fillna(0)
+
+all_data['MSZoning'].value_counts()
+all_data['MSZoning'] = all_data['MSZoning'].fillna(all_data['MSZoning'].mode()[0])
+
+all_data['Utilities'].value_counts()
+all_data = all_data.drop(['Utilities'], axis=1)
+
+all_data['Functional'] = all_data['Functional'].fillna('Typ')
+
+mode_col = ['Electrical', 'KitchenQual', 'Exterior1st', 'Exterior2nd', 'SaleType']
+for col in mode_col:
+    all_data[col] = all_data[col].fillna(all_data[col].mode()[0])
+
+all_data['MSSubClass'] = all_data['MSSubClass'].fillna('None')
+
+all_data_na = (all_data.isnull().sum()/len(all_data))*100
+all_data_na = all_data_na.drop(all_data_na[all_data_na==0].index).sort_values(ascending=False)
+missing_data = pd.DataFrame({'Missing Ratio' :all_data_na})
+missing_data.head()
+
+all_data['OverallCond'].value_counts()
+all_data['MSSubClass'] = all_data['MSSubClass'].apply(str)
+all_data['OverallCond'] = all_data['OverallCond'].astype(str)
+all_data['YrSold'] = all_data['YrSold'].astype(str)
+all_data['MoSold'] = all_data['MoSold'].astype(str)
+
+cols = ('FireplaceQu', 'BsmtQual', 'BsmtCond', 'GarageQual', 'GarageCond', 
+        'ExterQual', 'ExterCond','HeatingQC', 'PoolQC', 'KitchenQual', 'BsmtFinType1', 
+        'BsmtFinType2', 'Functional', 'Fence', 'BsmtExposure', 'GarageFinish', 'LandSlope',
+        'LotShape', 'PavedDrive', 'Street', 'Alley', 'CentralAir', 'MSSubClass', 'OverallCond', 
+        'YrSold', 'MoSold')
+for c in cols:
+    lbl = LabelEncoder()
+    lbl.fit(list(all_data[c].values))
+    all_data[c] = lbl.transform(list(all_data[c].values))
+
+all_data['TotalSF'] = all_data['TotalBsmtSF'] + all_data['1stFlrSF'] + all_data['2ndFlrSF']
+
+numeric_feats = all_data.dtypes[all_data.dtypes != 'object'].index
+skewed_feats = all_data[numeric_feats].apply(lambda x: skew(x.dropna())).sort_values(ascending=False)
+skewness = pd.DataFrame({'Skew': skewed_feats})
+skewness.head()
+skewness = skewness[abs(skewness)>0.75]
+skewed_features = skewness.index
+lam = 0.15
+for feat in skewed_features:
+    all_data[feat] = boxcox1p(all_data[feat], lam)
+
+all_data = pd.get_dummies(all_data)
+
+train = all_data[:ntrain]
+test = all_data[ntrain:]
+
+
+from sklearn.model_selection import KFold, cross_val_score, train_test_split
+n_folds = 5
+def rmsle_cv(model):
+    kf = KFold(n_folds, shuffle=True, random_state=42).get_n_splits(train.values)
+    rmse = np.sqrt(-cross_val_score(model, train.values, y_train, scoring='neg_mean_squared_error', cv=kf))
+    return (rmse)
+
+from sklearn.kernel_ridge import KernelRidge
+KRR = KernelRidge(alpha=0.6, kernel='polynomial', degree=2, coef0=2.5)
+score = rmsle_cv(KRR)
+print('Kernel Ridge score: {:.4f}({:.4f})\n'.format(score.mean(), score.std()))
+
+
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import RobustScaler
+from sklearn.linear_model import Lasso
+lasso = make_pipeline(RobustScaler(), Lasso(alpha=0.0005, random_state=1))
+score = rmsle_cv(lasso)
+print('Lasso score: {:.4f}({:.4f})\n'.format(score.mean(), score.std()))
+
+
+from sklearn.linear_model import ElasticNet
+ENet = make_pipeline(RobustScaler(), ElasticNet(alpha=0.0005, l1_ratio=0.9, random_state=3))
+score = rmsle_cv(ENet)
+print('ElasticNet score: {:.4f}({:.4f})\n'.format(score.mean(), score.std()))
+
+
+from sklearn.ensemble import GradientBoostingRegressor
+GBoost = GradientBoostingRegressor(n_estimators=3000, learning_rate=0.05, max_depth=4, max_features='sqrt',
+                                  min_samples_leaf=15, min_samples_split=10, loss='huber', random_state = 5)
+score = rmsle_cv(GBoost)
+print('Gradient Boosting score: {:.4f}({:.4f})\n'.format(score.mean(), score.std()))
+
+
+LassoMd = lasso.fit(train.values,y_train)
+ENetMd = ENet.fit(train.values,y_train)
+KRRMd = KRR.fit(train.values,y_train)
+GBoostMd = GBoost.fit(train.values,y_train)
+
+finalMd = (np.expm1(LassoMd.predict(test.values)) + np.expm1(ENetMd.predict(test.values)) + 
+           np.expm1(KRRMd.predict(test.values)) + np.expm1(GBoostMd.predict(test.values)) )/4
+
+sub = pd.DataFrame()
+sub['Id'] = test_ID
+sub['SalePrice'] = finalMd
+sub.to_csv('submission.csv',index=False)
