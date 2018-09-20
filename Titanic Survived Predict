@@ -1,0 +1,177 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
+import warnings
+warnings.filterwarnings("ignore")
+
+train = pd.read_csv('train.csv')
+test = pd.read_csv('test.csv')
+
+ntrain = train.shape[0]
+ntest = test.shape[0]
+y_train = train['Survived'].values
+all_data = pd.concat((train, test), axis=0).reset_index(drop=True)
+all_data_na = (all_data.isnull().sum()/len(all_data))*100
+
+
+sns.countplot(train['Sex'], hue=train['Survived'])
+all_data[['Sex', 'Survived']].groupby(['Sex']).mean()
+sns.countplot(train['Pclass'], hue=train['Survived'])
+all_data[['Pclass', 'Survived']].groupby(['Pclass']).mean()
+
+from sklearn.preprocessing import LabelEncoder
+lbl = LabelEncoder()
+all_data['Sex'] = lbl.fit_transform(all_data['Sex'])
+test['Sex'] = lbl.fit_transform(test['Sex'])
+
+
+training_data = all_data[:ntrain]
+testing_data = all_data[ntrain:]
+X = training_data.drop(['Survived', 'PassengerId'], axis=1)
+Y = training_data['Survived']
+Base = ['Sex', 'Pclass']
+Base_model = RandomForestClassifier(random_state=2, n_estimators=250, min_samples_split=20, oob_score=True)
+Base_model.fit(X[Base], Y)
+Base_model.oob_score_
+Base_result = Base_model.predict(testing_data[Base])
+submit = pd.read_csv('gender_submission.csv')
+submit['Survived'] = Base_result
+submit['Survived'] = submit['Survived'].astype(int)
+submit.to_csv('submit.csv', index= False)
+
+
+
+
+
+
+all_data['log_Fare'] = (all_data['Fare']+1).map(lambda x: np.log10(x) if x>0 else 0)
+fig, ax = plt.subplots()
+sns.boxplot(data=all_data, x='log_Fare', y='Pclass', hue='Survived', orient='h', ax=ax, palette='Set3')
+pd.pivot_table(all_data, values=['Fare'], index=['Pclass'], columns=['Survived'], aggfunc='median')
+all_data['Fare'] = all_data['Fare'].fillna(all_data['Fare'].median())
+
+all_data['FareBin_4'] = pd.qcut(all_data['Fare'], 4)
+all_data['FareBin_5'] = pd.qcut(all_data['Fare'], 5)
+all_data['FareBin_6'] = pd.qcut(all_data['Fare'], 6)
+all_data['FareBin_4'] = lbl.fit_transform(all_data['FareBin_4'])
+all_data['FareBin_5'] = lbl.fit_transform(all_data['FareBin_5'])
+all_data['FareBin_6'] = lbl.fit_transform(all_data['FareBin_6'])
+
+fig, [ax1, ax2, ax3] = plt.subplots(1, 3, sharey=True)
+fig.set_figwidth(10)
+g1 = sns.factorplot(x='FareBin_4', y='Survived', data=all_data, kind='bar', ax=ax1)
+g2 = sns.factorplot(x='FareBin_5', y='Survived', data=all_data, kind='bar', ax=ax2)
+g3 = sns.factorplot(x='FareBin_6', y='Survived', data=all_data, kind='bar', ax=ax3)
+plt.close(g1.fig)
+plt.close(g2.fig)
+plt.close(g3.fig)
+
+training_data = all_data[:ntrain]
+testing_data = all_data[ntrain:]
+X = training_data.drop(['Survived', 'PassengerId'], axis=1)
+Y = training_data['Survived']
+X.columns
+compare = ['Sex', 'Pclass', 'FareBin_4', 'FareBin_5', 'FareBin_6']
+from sklearn.feature_selection import RFECV
+selector = RFECV(RandomForestClassifier(n_estimators=250, min_samples_split=20), cv=10, n_jobs=1)
+selector.fit(X[compare], Y)
+print(selector.support_)
+print(selector.ranking_)
+print(selector.grid_scores_*100)
+
+b5 = ['Sex', 'Pclass', 'FareBin_5']
+b5_model = RandomForestClassifier(random_state=2, n_estimators=250, min_samples_split=20, oob_score=True)
+b5_model.fit(X[b5], Y)
+b5_model.oob_score_
+b5_result = b5_model.predict(testing_data[b5])
+submit = pd.read_csv('gender_submission.csv')
+submit['Survived'] = b5_result
+submit['Survived'] = submit['Survived'].astype(int)
+submit.to_csv('submit.csv', index= False)
+
+
+
+
+
+
+deplicate_ticket = []
+for tk in all_data['Ticket'].unique():
+    tem = all_data.loc[all_data['Ticket']==tk, 'Fare']
+    if tem.count() > 1:
+        deplicate_ticket.append(all_data.loc[all_data['Ticket']==tk, ['Name', 'Ticket', 'Fare', 'Cabin', 'Family_size', 'Survived']])
+dplicate_ticket = pd.concat(deplicate_ticket)
+all_data['Connected_Survival'] = 0
+for _, df_grp in all_data.groupby('Ticket'):
+    if (len(df_grp) > 1):
+        for ind, row in df_grp.iterrows():
+            smean = df_grp.drop(ind)['Survived'].mean()
+            passID = row['PassengerId']
+            if (smean >= 0.5):
+                all_data.loc[all_data['PassengerId'] == passID, 'Connected_Survival'] = 1
+            elif (smean < 0.5):
+                all_data.loc[all_data['PassengerId'] == passID, 'Connected_Survival'] = -1
+
+training_data = all_data[:ntrain]
+testing_data = all_data[ntrain:]
+X = training_data.drop(['Survived', 'PassengerId'], axis=1)
+Y = training_data['Survived']
+connect = ['Sex', 'Pclass', 'FareBin_5', 'Connected_Survival']
+connect_model = RandomForestClassifier(random_state=2, n_estimators=250, min_samples_split=20, oob_score=True)
+connect_model.fit(X[connect], Y)
+connect_model.oob_score_
+connect_result = connect_model.predict(testing_data[connect])
+submit = pd.read_csv('gender_submission.csv')
+submit['Survived'] = connect_result
+submit['Survived'] = submit['Survived'].astype(int)
+submit.to_csv('submit.csv', index= False)
+
+
+
+
+
+
+all_data['Has_Age'] = all_data['Age'].isnull().map(lambda x: 0 if x==True else 1)
+fig, [ax1, ax2] = plt.subplots(1, 2)
+fig.set_figwidth(10)
+ax1 = sns.countplot(all_data['Pclass'], hue=all_data['Has_Age'], ax=ax1)
+ax2 = sns.countplot(all_data['Sex'], hue=all_data['Has_Age'], ax=ax2)
+pd.crosstab(all_data['Has_Age'], all_data['Sex'])
+
+Has_Age_P12_Survived = (all_data['Has_Age']==1) & (all_data['Pclass'] !=3) & (all_data['Survived']==1)
+Has_Age_P12_Dead = (all_data['Has_Age']==1) & (all_data['Pclass'] !=3) & (all_data['Survived']==0)
+fig, ax = plt.subplots()
+ax = sns.distplot(all_data.loc[Has_Age_P12_Survived, 'Age'], label='Survived')
+ax = sns.distplot(all_data.loc[Has_Age_P12_Dead, 'Age'], label='Dead')
+ax.legend()
+
+all_data['title'] = all_data['Name'].str.split(', ', expand=True)[1].str.split('.', expand=True)[0]
+pd.crosstab(all_data['title'], all_data['Sex'])
+all_data.groupby(['title'])['Age'].mean()
+
+all_data['title'] = all_data['title'].replace(['Capt', 'Col', 'Don', 'Dr', 'Jonkheer', 'Major', 'Rev', 'Sir'], 'Mr')
+all_data['title'] = all_data['title'].replace(['Dona', 'Lady', 'the Countess'], 'Mrs')
+all_data['title'] = all_data['title'].replace(['Mlle', 'Mme', 'Ms'], 'Miss')
+all_data.loc[(all_data['Sex']==0)&(all_data['title']=='Mr'), 'title']='Mrs'
+
+lbl = LabelEncoder()
+all_data['title'] = lbl.fit_transform(all_data['title'])
+all_data.groupby('title')['Age'].median()
+for i in all_data.groupby('title')['Age'].median().index:
+    all_data.loc[(all_data['title']==i) & (all_data['Age'].isnull()), 'Age'] = all_data.groupby('title')['Age'].median().loc[i]
+
+training_data = all_data[:ntrain]
+testing_data = all_data[ntrain:]
+X = training_data.drop(['Survived', 'PassengerId'], axis=1)
+Y = training_data['Survived']
+
+age = ['Sex', 'Pclass', 'FareBin_5', 'Connected_Survival', 'title']
+age_model = RandomForestClassifier(random_state=2, n_estimators=250, min_samples_split=20, oob_score=True)
+age_model.fit(X[age], Y)
+age_model.oob_score_
+age_result = age_model.predict(testing_data[age])
+submit = pd.read_csv('gender_submission.csv')
+submit['Survived'] = age_result
+submit['Survived'] = submit['Survived'].astype(int)
+submit.to_csv('submit.csv', index= False)
