@@ -1,0 +1,65 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+import statsmodels as sm
+warnings.filterwarnings("ignore")
+
+train = pd.read_csv('sales_train_v2.csv')
+test = pd.read_csv('test.csv')
+items = pd.read_csv('items.csv')
+item_categories = pd.read_csv('item_categories.csv')
+shops = pd.read_csv('shops.csv')
+
+train['date'] = pd.to_datetime(train['date'], format='%d.%m.%Y')
+train = train[(train['itme_price']>0) & (train['item_price']<300000)]
+train.loc[:, 'item_price'] = train['item_price'].map(np.log1p)
+
+shopid_itmeid_X_dateblocknum = train.pivot_table(index=['shop_id', 'item_id'], columns='date_block_num', values='item_cnt_day', aggfunc='sum').fillna(0)
+
+l = list(item_categories.item_category_name)
+l_cat = l
+item_categories['cats'] = l_cat
+item_categories.head()
+
+train_cleaned_df = shopid_itmeid_X_dateblocknum.reset_index()
+train_cleaned_df['shop_id'] = train_cleaned_df['shop_id'].astype('str')
+train_cleaned_df['item_id'] = train_cleaned_df['item_id'].astype('str')
+items_to_cat_df = items.merge(item_categories[['item_category_id', 'cats']], how='inner', on='item_category_id')[['item_id', 'cats']]
+items_to_cat_df['item_id'] = items_to_cat_df['item_id'].astype('str')
+from sklearn.preprocessing import LabelEncoder
+lbl = LabelEncoder()
+items_to_cat_df['cats'] = lbl.fit_transform(items_to_cat_df['cats'])
+train_cleaned_df = pd.merge(train_cleaned_df, items_to_cat_df, how='left', on='item_id')
+train_cleaned_df = train_cleaned_df[['shop_id', 'item_id', 'cats'] + list(range(34))]
+
+import xgboost as xgb
+param = {'max_depth':10, 
+         'subsample':1,
+         'min_child_weight':0.5,
+         'eta':0.3, 
+         'num_round':1000, 
+         'seed':1,
+         'silent':0,
+         'eval_metric':'rmse'}
+
+progress = dict()
+xgbtrain = xgb.DMatrix(train_cleaned_df.iloc[:, (train_cleaned_df.columns != 33)].values, train_cleaned_df.iloc[:, (train_cleaned_df.columns == 33)].values)
+bst = xgb.train(param, xgbtrain)
+preds = bst.predict(xgb.DMatrix(train_cleaned_df.iloc[:,  (train_cleaned_df.columns != 33)].values))
+
+from sklearn.metrics import mean_squared_error
+rmse = np.sqrt(mean_squared_error(preds,train_cleaned_df.iloc[:, train_cleaned_df.columns == 33].values))
+test['shop_id'] = test['shop_id'].astype('str')
+test['item_id'] = test['item_id'].astype('str')
+test = pd.merge(test, train_cleaned_df, how='left', on=['shop_id', 'item_id']).fillna(0)
+
+for i in range(34):
+    test.rename(columns={i:i-1}, inplace=True)
+test.drop(['ID', -1], axis=1, inplace=True)
+bst_result = bst.predict(xgb.DMatrix(test.values))
+submit = pd.read_csv('sample_submission.csv')
+submit['item_cnt_month'] = bst_result
+submit['item_cnt_month'] = submit['item_cnt_month'].astype(int)
+submit.to_csv('submit.csv', index= False)
