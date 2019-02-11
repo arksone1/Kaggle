@@ -3,6 +3,9 @@
 06 PUBG Finish Placement Prediction
 Ranking 419/1534 (in 2019/01/31)
 
+
+
+
 04 Digit Recognizer
 Ranking 972/2520 (in 2018/10/03)
 
